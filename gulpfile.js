@@ -45,6 +45,15 @@ import changed from "gulp-changed";
 import { deleteAsync } from "del";
 
 // ==================================================
+// エラーハンドラ（plumber + notify）共通化
+// ==================================================
+function withPlumber(taskName) {
+  return plumber({
+    errorHandler: notify.onError(`[${taskName} ERROR] <%= error.message %>`),
+  });
+}
+
+// ==================================================
 // パス設定
 // ==================================================
 const srcPath = {
@@ -71,14 +80,16 @@ const destPath = {
 // ==================================================
 function css() {
   return src(srcPath.css)
-    .pipe(plumber({ errorHandler: notify.onError("[SASS ERROR] <%= error.message %>") }))
+    .pipe(withPlumber("SASS"))
     .pipe(sassGlob())
     .pipe(sass().on("error", sass.logError))
-    .pipe(postcss([
-      autoprefixer({ overrideBrowserslist: ['defaults', 'not op_mini all'] }),
-      postcssSortMediaQueries(),
-      cssdeclsort({ order: "smacss" })
-    ]))
+    .pipe(
+      postcss([
+        autoprefixer({ overrideBrowserslist: ["defaults", "not op_mini all"] }),
+        postcssSortMediaQueries(),
+        cssdeclsort({ order: "smacss" }),
+      ])
+    )
     .pipe(dest(destPath.css))
     .pipe(browserSync.stream());
 }
@@ -87,21 +98,24 @@ function css() {
 // JSコピー（圧縮なし）
 // ==================================================
 function js() {
-  return src(srcPath.js)
-    .pipe(dest(destPath.js));
+  return src(srcPath.js).pipe(dest(destPath.js));
 }
 
 // ==================================================
-// EJSコンパイル用 JSON一括読み込み関数
+// EJSコンパイル用 JSON一括読み込み関数（try-catch対応）
 // ==================================================
-function loadJsonData(dir = './src/ejs/data') {
-  const files = fs.readdirSync(dir).filter(file => file.endsWith('.json'));
+function loadJsonData(dir = "./src/ejs/data") {
+  const files = fs.readdirSync(dir).filter((file) => file.endsWith(".json"));
   const data = {};
 
-  files.forEach(file => {
-    const key = path.basename(file, '.json');
-    const content = fs.readFileSync(path.join(dir, file), 'utf8');
-    data[key] = JSON.parse(content);
+  files.forEach((file) => {
+    const key = path.basename(file, ".json");
+    try {
+      const content = fs.readFileSync(path.join(dir, file), "utf8");
+      data[key] = JSON.parse(content);
+    } catch (error) {
+      console.warn(`[loadJsonData] ${key}.json の読み込みに失敗しました:`, error.message);
+    }
   });
 
   return data;
@@ -114,20 +128,20 @@ function ejsCompile() {
   const json = loadJsonData();
 
   return src(srcPath.ejs)
-    .pipe(plumber({ errorHandler: notify.onError("[EJS ERROR] <%= error.message %>") }))
+    .pipe(withPlumber("EJS"))
     .pipe(
       through2.obj(function (file, _, cb) {
-        const fileName = path.basename(file.path, '.ejs');
-        const pageDataKey = fileName === 'index' ? 'top' : fileName;
+        const fileName = path.basename(file.path, ".ejs");
+        const pageDataKey = fileName === "index" ? "top" : fileName;
 
         try {
           const template = ejsCompiler.compile(file.contents.toString(), {
-            filename: file.path, // インクルードの相対パスを有効にする
+            filename: file.path,
           });
 
           const html = template({
-            baseUrlPath: '.',
-            ejsPath: '.',
+            baseUrlPath: ".",
+            ejsPath: ".",
             page: json,
           });
 
@@ -139,14 +153,16 @@ function ejsCompile() {
       })
     )
     .pipe(rename({ extname: ".html" }))
-    .pipe(replace(/^[ \t]*\n/gm, "")) // 空行削除
-    .pipe(htmlbeautify({
-      indent_size: 2,
-      indent_char: " ",
-      max_preserve_newlines: 0,
-      preserve_newlines: false,
-      extra_liners: [],
-    }))
+    .pipe(replace(/^[ \t]*\n/gm, ""))
+    .pipe(
+      htmlbeautify({
+        indent_size: 2,
+        indent_char: " ",
+        max_preserve_newlines: 0,
+        preserve_newlines: false,
+        extra_liners: [],
+      })
+    )
     .pipe(dest(destPath.html))
     .on("end", browserSync.reload);
 }
@@ -156,7 +172,7 @@ function ejsCompile() {
 // ==================================================
 function compressImages() {
   return src(srcPath.imgRaster, { encoding: false })
-    .pipe(changed(destPath.img)) // 変更があった画像のみ処理
+    .pipe(changed(destPath.img))
     .pipe(
       through2.obj(async (file, _, cb) => {
         if (file.isBuffer()) {
@@ -164,10 +180,14 @@ function compressImages() {
             const ext = path.extname(file.path).toLowerCase();
             let outputBuffer;
 
-            if (ext === '.jpg' || ext === '.jpeg') {
-              outputBuffer = await sharp(file.contents).jpeg({ quality: 75 }).toBuffer();
-            } else if (ext === '.png') {
-              outputBuffer = await sharp(file.contents).png({ quality: 75 }).toBuffer();
+            if (ext === ".jpg" || ext === ".jpeg") {
+              outputBuffer = await sharp(file.contents)
+                .jpeg({ quality: 75 })
+                .toBuffer();
+            } else if (ext === ".png") {
+              outputBuffer = await sharp(file.contents)
+                .png({ quality: 75 })
+                .toBuffer();
             }
 
             file.contents = outputBuffer;
@@ -188,12 +208,14 @@ function compressImages() {
 // ==================================================
 function convertToAvif() {
   return src(srcPath.imgRaster, { encoding: false })
-    .pipe(changed(destPath.img, { extension: '.avif' })) // AVIF変換済みがないものだけ
+    .pipe(changed(destPath.img, { extension: ".avif" }))
     .pipe(
       through2.obj(async (file, _, cb) => {
         if (file.isBuffer()) {
           try {
-            const outputBuffer = await sharp(file.contents).avif({ quality: 75 }).toBuffer();
+            const outputBuffer = await sharp(file.contents)
+              .avif({ quality: 75 })
+              .toBuffer();
             const avifFile = file.clone();
             avifFile.path = file.path.replace(/\.(jpg|jpeg|png)$/i, ".avif");
             avifFile.contents = outputBuffer;
@@ -211,7 +233,6 @@ function convertToAvif() {
 
 // ==================================================
 // SVG圧縮（SVGO）
-// 修正: imagemin.buffer の戻り値が Buffer 以外の場合に対応
 // ==================================================
 function compressSVG() {
   return src(srcPath.imgSvg)
@@ -225,25 +246,22 @@ function compressSVG() {
                 imageminSvgo({
                   plugins: [
                     {
-                      name: 'preset-default',
+                      name: "preset-default",
                       params: {
                         overrides: {
                           removeViewBox: true,
-                        }
-                      }
+                        },
+                      },
                     },
-                    { name: 'removeDimensions', active: true }
-                  ]
-                })
-              ]
+                    { name: "removeDimensions", active: true },
+                  ],
+                }),
+              ],
             });
 
-            // 出力が Uint8Array であれば Buffer に変換
             if (outputBuffer instanceof Uint8Array) {
               outputBuffer = Buffer.from(outputBuffer);
-            }
-            // Buffer でなければ文字列として変換して Buffer 化
-            else if (!Buffer.isBuffer(outputBuffer)) {
+            } else if (!Buffer.isBuffer(outputBuffer)) {
               outputBuffer = Buffer.from(String(outputBuffer));
             }
             file.contents = outputBuffer;
@@ -260,6 +278,11 @@ function compressSVG() {
 }
 
 // ==================================================
+// 画像タスクまとめ
+// ==================================================
+export const images = parallel(compressImages, convertToAvif, compressSVG);
+
+// ==================================================
 // ローカルサーバー起動
 // ==================================================
 function serve(done) {
@@ -273,7 +296,7 @@ function serve(done) {
 // ==================================================
 // クリーン（dist削除）
 // ==================================================
-const clean = () => deleteAsync(['./dist'], { force: true });
+const clean = () => deleteAsync(["./dist"], { force: true });
 export { clean };
 
 // ==================================================
@@ -284,27 +307,19 @@ function watchFiles() {
   watch(srcPath.js, js);
   watch(srcPath.ejsWatch, ejsCompile);
   watch(srcPath.jsonWatch, ejsCompile);
-  watch(srcPath.imgRaster, parallel(compressImages, convertToAvif));
-  watch(srcPath.imgSvg, compressSVG);
+  watch(srcPath.imgRaster, images);
+  watch(srcPath.imgSvg, images);
 }
 
 // ==================================================
 // タスク定義
 // ==================================================
 export const defaultTask = series(
-  parallel(css, js, ejsCompile, compressImages, convertToAvif, compressSVG),
+  parallel(css, js, ejsCompile, images),
   serve,
   watchFiles
 );
 
 export default defaultTask;
 
-export const build = series(
-  clean,
-  css,
-  js,
-  ejsCompile,
-  compressImages,
-  convertToAvif,
-  compressSVG
-);
+export const build = series(clean, css, js, ejsCompile, images);
