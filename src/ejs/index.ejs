@@ -1,14 +1,13 @@
-<% baseUrlPath='.' ; ejsPath='.' ; pageData="top" %>
 <!DOCTYPE html>
 <html lang="ja">
-  <%- include(ejsPath + '/common/_head' ,{ baseUrl: baseUrlPath, page:
-  json[pageData] }) %>
+<%- include(ejsPath + '/common/_head' , { baseUrl: baseUrlPath, page: page.pageData.top }) %>
 
   <body>
     <%- include(ejsPath + '/common/_header' ) %>
-    <main>
-      
-    </main>
-    <%- include(ejsPath + '/common/_footer' ) %>
+      <main>
+        testtestaaa
+      </main>
+      <%- include(ejsPath + '/common/_footer' ) %>
   </body>
+
 </html>
